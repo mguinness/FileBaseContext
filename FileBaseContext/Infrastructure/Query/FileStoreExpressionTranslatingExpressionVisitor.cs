@@ -1,5 +1,6 @@
 using kDg.FileBaseContext.Extensions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Query;
@@ -404,24 +405,26 @@ public class FileBaseContextExpressionTranslatingExpressionVisitor : ExpressionV
     }
 
     protected override Expression VisitExtension(Expression extensionExpression)
-    {
-        switch (extensionExpression)
+        => extensionExpression switch
         {
-            case EntityProjectionExpression:
-            case EntityReferenceExpression:
-                return extensionExpression;
+            EntityProjectionExpression or EntityReferenceExpression
+                => extensionExpression,
 
-            case StructuralTypeShaperExpression entityShaperExpression:
-                return new EntityReferenceExpression(entityShaperExpression);
+            QueryParameterExpression queryParameter
+                => Expression.Call(
+                    GetParameterValueMethodInfo.MakeGenericMethod(queryParameter.Type),
+                    QueryCompilationContext.QueryContextParameter,
+                    Expression.Constant(queryParameter.Name)),
 
-            case ProjectionBindingExpression projectionBindingExpression:
-                return ((FileBaseContextQueryExpression)projectionBindingExpression.QueryExpression)
-                    .GetProjection(projectionBindingExpression);
+            StructuralTypeShaperExpression entityShaperExpression
+                => new EntityReferenceExpression(entityShaperExpression),
 
-            default:
-                return QueryCompilationContext.NotTranslatedExpression;
-        }
-    }
+            ProjectionBindingExpression projectionBindingExpression
+                => ((FileBaseContextQueryExpression)projectionBindingExpression.QueryExpression)
+                    .GetProjection(projectionBindingExpression),
+
+            _ => QueryCompilationContext.NotTranslatedExpression
+        };
 
     protected override Expression VisitInvocation(InvocationExpression invocationExpression)
         => QueryCompilationContext.NotTranslatedExpression;
@@ -848,12 +851,7 @@ public class FileBaseContextExpressionTranslatingExpressionVisitor : ExpressionV
     }
 
     protected override Expression VisitParameter(ParameterExpression parameterExpression)
-    {
-        return Expression.Call(
-            GetParameterValueMethodInfo.MakeGenericMethod(parameterExpression.Type),
-            QueryCompilationContext.QueryContextParameter,
-            Expression.Constant(parameterExpression.Name));
-    }
+        => throw new InvalidOperationException(CoreStrings.TranslationFailed(parameterExpression.Print()));
 
     protected override Expression VisitTypeBinary(TypeBinaryExpression typeBinaryExpression)
     {
